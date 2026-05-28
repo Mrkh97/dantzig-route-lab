@@ -1,0 +1,199 @@
+import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+import {
+  Algorithm,
+  FitnessCalculator,
+  Sample,
+  SeededRandom,
+  calculateGenerationPercent,
+  defaultConfig,
+  parseDantzigData,
+  validateConfig
+} from "../src/lib/tsp/index.js";
+import type { GAConfig, GAProgressSnapshot } from "../src/lib/tsp/index.js";
+
+const smallTspData = {
+  cities: [1, 2, 3, 4],
+  distances: [
+    [0, 10, 14, 10],
+    [10, 0, 10, 14],
+    [14, 10, 0, 10],
+    [10, 14, 10, 0]
+  ],
+  minimalTourLength: 40
+};
+
+function loadFixtureData() {
+  const root = resolve(import.meta.dirname, "..", "..");
+  return parseDantzigData({
+    cityData: readFileSync(resolve(root, "cityData.txt"), "utf8"),
+    intercityDistance: readFileSync(resolve(root, "intercityDistance.txt"), "utf8"),
+    minimalTourLength: readFileSync(resolve(root, "minimal tour length.txt"), "utf8")
+  });
+}
+
+describe("Dantzig dataset", () => {
+  it("loads the dataset and reference tour length", () => {
+    const data = loadFixtureData();
+
+    expect(data.cities).toHaveLength(42);
+    expect(data.distances).toHaveLength(42);
+    expect(data.distances.every((row) => row.length === 42)).toBe(true);
+    expect(data.minimalTourLength).toBe(699);
+  });
+});
+
+describe("PMX crossover", () => {
+  it("produces valid permutations", () => {
+    const parent1 = Sample.fromRoute([1, 2, 3, 4, 5, 6, 7, 8]);
+    const parent2 = Sample.fromRoute([4, 1, 2, 8, 7, 6, 5, 3]);
+
+    const [child1, child2] = Algorithm.pmxCrossover(parent1, parent2, new SeededRandom(7));
+
+    expect(child1.isValidPermutation(parent1.route)).toBe(true);
+    expect(child2.isValidPermutation(parent1.route)).toBe(true);
+  });
+});
+
+describe("mutation", () => {
+  it("keeps valid permutations", () => {
+    const sample = Sample.fromRoute([1, 2, 3, 4, 5, 6]);
+
+    Algorithm.mutate(sample, new SeededRandom(3), 1);
+
+    expect(sample.isValidPermutation([1, 2, 3, 4, 5, 6])).toBe(true);
+  });
+});
+
+describe("fitness", () => {
+  it("includes the return edge to the starting city", () => {
+    const distances = [
+      [0, 10, 20],
+      [10, 0, 30],
+      [20, 30, 0]
+    ];
+    const sample = Sample.fromRoute([1, 2, 3]);
+    const calculator = new FitnessCalculator(distances);
+
+    expect(calculator.calculateTotalDistance(sample)).toBe(60);
+  });
+});
+
+describe("config validation", () => {
+  it("rejects invalid values", () => {
+    const invalid: GAConfig = {
+      ...defaultConfig,
+      populationSize: 4,
+      eliteCount: 4
+    };
+
+    expect(() => validateConfig(invalid)).toThrow("eliteCount");
+  });
+
+  it("allows -1 as the random seed sentinel", () => {
+    expect(() => validateConfig({ ...defaultConfig, seed: -1 })).not.toThrow();
+  });
+});
+
+describe("solver", () => {
+  it("returns a valid roulette route", () => {
+    const data = loadFixtureData();
+    const result = new Algorithm(
+      data.cities,
+      data.distances,
+      { ...defaultConfig, generations: 20, populationSize: 50, crossoverCount: 30, seed: 42 },
+      "roulette"
+    ).run(data.minimalTourLength);
+
+    expect(result.routeIsValid).toBe(true);
+    expect(result.bestSample.route).toHaveLength(42);
+    expect(result.bestSample.totalDistance).toBeGreaterThan(0);
+  });
+
+  it("returns a valid tournament route", () => {
+    const data = loadFixtureData();
+    const result = new Algorithm(
+      data.cities,
+      data.distances,
+      { ...defaultConfig, generations: 20, populationSize: 50, crossoverCount: 30, seed: 43 },
+      "tournament"
+    ).run(data.minimalTourLength);
+
+    expect(result.routeIsValid).toBe(true);
+    expect(result.bestSample.route).toHaveLength(42);
+    expect(result.bestSample.totalDistance).toBeGreaterThan(0);
+  });
+
+  it("reports progressive percent from generation count", async () => {
+    const snapshots: GAProgressSnapshot[] = [];
+
+    await new Algorithm(
+      smallTspData.cities,
+      smallTspData.distances,
+      {
+        ...defaultConfig,
+        generations: 1000,
+        populationSize: 8,
+        crossoverCount: 4,
+        eliteCount: 1,
+        tournamentSize: 2,
+        mutationRate: 0.15,
+        seed: 17
+      },
+      "tournament"
+    ).runProgressive(smallTspData.minimalTourLength, {
+      yieldEvery: 1001,
+      onProgress: (snapshot) => {
+        snapshots.push(snapshot);
+      }
+    });
+
+    expect(snapshots).toHaveLength(1001);
+    expect(calculateGenerationPercent(10, 1000)).toBe(1);
+    expect(snapshots[10].generation).toBe(10);
+    expect(snapshots[10].percent).toBe(1);
+    expect(snapshots.at(-1)?.percent).toBe(100);
+    expect(snapshots.every((snapshot, index) => index === 0 || snapshot.percent >= snapshots[index - 1].percent)).toBe(
+      true
+    );
+  });
+
+  it("emits a valid generation route for every progressive snapshot", async () => {
+    const snapshots: GAProgressSnapshot[] = [];
+
+    await new Algorithm(
+      smallTspData.cities,
+      smallTspData.distances,
+      {
+        ...defaultConfig,
+        generations: 12,
+        populationSize: 8,
+        crossoverCount: 4,
+        eliteCount: 1,
+        tournamentSize: 2,
+        mutationRate: 0.35,
+        seed: 23
+      },
+      "tournament"
+    ).runProgressive(smallTspData.minimalTourLength, {
+      yieldEvery: 20,
+      onProgress: (snapshot) => {
+        snapshots.push(snapshot);
+      }
+    });
+
+    expect(snapshots).toHaveLength(13);
+    expect(
+      snapshots.every(
+        (snapshot) =>
+          snapshot.routeIsValid &&
+          snapshot.currentGenerationRoute.length === smallTspData.cities.length &&
+          snapshot.bestRoute.join(",") === snapshot.currentGenerationRoute.join(",") &&
+          [...snapshot.currentGenerationRoute].sort((left, right) => left - right).join(",") ===
+            smallTspData.cities.join(",")
+      )
+    ).toBe(true);
+  });
+});
