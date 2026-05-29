@@ -1,15 +1,11 @@
 import {
-  BarChart3,
-  Download,
   LoaderCircle,
   Network,
-  Settings,
   ShieldAlert,
   SlidersHorizontal
 } from "lucide-react";
 import { useEffect, type ReactElement } from "react";
 
-import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { ControlPanel } from "@/ui/components/ControlPanel";
@@ -54,7 +50,7 @@ export function App(): ReactElement {
 
   return (
     <main className="min-h-screen bg-background text-foreground">
-      <header className="grid h-[72px] grid-cols-[minmax(440px,1fr)_minmax(420px,0.9fr)_auto] items-center border-b border-border bg-card px-6">
+      <header className="grid h-[72px] grid-cols-[minmax(440px,1fr)_minmax(420px,0.9fr)] items-center border-b border-border bg-card px-6">
         <div className="flex min-w-0 items-center gap-4">
           <div className="grid size-11 place-items-center text-primary">
             <Network strokeWidth={1.4} className="size-10" />
@@ -85,23 +81,11 @@ export function App(): ReactElement {
             <Progress value={progressValue} />
           </div>
         </div>
-
-        <div className="flex items-center gap-5">
-          <Button variant="outline" size="icon-lg" aria-label="Open analytics">
-            <BarChart3 data-icon="inline-start" />
-          </Button>
-          <Button variant="outline" size="icon-lg" aria-label="Download current run">
-            <Download data-icon="inline-start" />
-          </Button>
-          <Button variant="outline" size="icon-lg" aria-label="Open settings">
-            <Settings data-icon="inline-start" />
-          </Button>
-        </div>
       </header>
 
-      <section className="grid grid-cols-[minmax(0,1fr)_440px] border-b border-border">
+      <section className="grid h-[850px] grid-cols-[minmax(0,1fr)_440px] gap-5 border-b border-border bg-[#f9e8cd] p-5">
         <RouteMap coordinates={data?.coordinates ?? null} route={currentRoute} status={status} />
-        <aside className="border-l border-border bg-card px-6 py-6">
+        <aside className="h-fit max-h-full self-start overflow-y-auto rounded-lg border border-white/60 bg-white/80 px-6 py-6 shadow-[0_18px_35px_-24px_rgba(17,24,39,0.35)] backdrop-blur">
           <div className="mb-5 flex items-center gap-2">
             <SlidersHorizontal className="size-4" />
             <h2 className="text-base font-semibold">Algorithm Controls</h2>

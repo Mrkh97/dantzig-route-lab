@@ -38,14 +38,14 @@ export function RouteMap({ coordinates, route, status }: RouteMapProps): ReactEl
 
   if (!coordinates) {
     return (
-      <section className="h-[584px] bg-card p-5">
+      <section className="h-full">
         <Skeleton className="size-full rounded-lg" />
       </section>
     );
   }
 
   return (
-    <section className="relative h-[584px] bg-card p-5">
+    <section className="relative h-full">
       <svg className="block size-full" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Dantzig route map with United States context">
         <defs>
           <clipPath id="route-map-plot-clip">
@@ -104,13 +104,13 @@ export function RouteMap({ coordinates, route, status }: RouteMapProps): ReactEl
         ))}
       </svg>
 
-      <div className="absolute bottom-8 right-8 flex items-center gap-3 rounded-md border border-border bg-card px-4 py-2 text-sm shadow-sm">
+      <div className="absolute bottom-8 right-8 flex items-center gap-3 rounded-md border border-white/70 bg-white/85 px-4 py-2 text-sm shadow-sm backdrop-blur">
         <span className="h-px w-7 bg-primary" />
         <span>Best tour (current)</span>
       </div>
 
       {route.length === 0 ? (
-        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 rounded-md border border-border bg-card px-4 py-2 text-sm text-muted-foreground shadow-sm">
+        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 rounded-md border border-white/70 bg-white/85 px-4 py-2 text-sm text-muted-foreground shadow-sm backdrop-blur">
           {status === "running" ? "Waiting for first generation" : "Run the solver to draw the route"}
         </div>
       ) : null}
