@@ -12,7 +12,10 @@ import {
   parseDantzigData,
   validateConfig
 } from "../src/lib/tsp/index.js";
-import type { GAConfig, GAProgressSnapshot } from "../src/lib/tsp/index.js";
+import type { AlgorithmType, GAConfig, GAProgressSnapshot, MutationMethod } from "../src/lib/tsp/index.js";
+
+const algorithmTypes: AlgorithmType[] = ["simple", "elitist", "steady-state", "memetic"];
+const mutationMethods: MutationMethod[] = ["swap", "inversion", "insertion", "scramble"];
 
 const smallTspData = {
   cities: [1, 2, 3, 4],
@@ -65,6 +68,14 @@ describe("mutation", () => {
 
     expect(sample.isValidPermutation([1, 2, 3, 4, 5, 6])).toBe(true);
   });
+
+  it.each(mutationMethods)("keeps valid permutations with %s mutation", (mutationMethod) => {
+    const sample = Sample.fromRoute([1, 2, 3, 4, 5, 6]);
+
+    Algorithm.mutate(sample, new SeededRandom(3), 1, mutationMethod);
+
+    expect(sample.isValidPermutation([1, 2, 3, 4, 5, 6])).toBe(true);
+  });
 });
 
 describe("fitness", () => {
@@ -82,6 +93,10 @@ describe("fitness", () => {
 });
 
 describe("config validation", () => {
+  it("defaults to the random seed sentinel", () => {
+    expect(defaultConfig.seed).toBe(-1);
+  });
+
   it("rejects invalid values", () => {
     const invalid: GAConfig = {
       ...defaultConfig,
@@ -94,6 +109,16 @@ describe("config validation", () => {
 
   it("allows -1 as the random seed sentinel", () => {
     expect(() => validateConfig({ ...defaultConfig, seed: -1 })).not.toThrow();
+  });
+
+  it("validates tournament size only when tournament selection is used", () => {
+    const rouletteConfig: GAConfig = {
+      ...defaultConfig,
+      tournamentSize: 0
+    };
+
+    expect(() => validateConfig(rouletteConfig, "roulette")).not.toThrow();
+    expect(() => validateConfig(rouletteConfig, "tournament")).toThrow("tournamentSize");
   });
 });
 
@@ -118,6 +143,55 @@ describe("solver", () => {
       data.cities,
       data.distances,
       { ...defaultConfig, generations: 20, populationSize: 50, crossoverCount: 30, seed: 43 },
+      "tournament"
+    ).run(data.minimalTourLength);
+
+    expect(result.routeIsValid).toBe(true);
+    expect(result.bestSample.route).toHaveLength(42);
+    expect(result.bestSample.totalDistance).toBeGreaterThan(0);
+  });
+
+  it.each(algorithmTypes)("returns a valid small route with the %s algorithm", (algorithmType) => {
+    const result = new Algorithm(
+      smallTspData.cities,
+      smallTspData.distances,
+      {
+        ...defaultConfig,
+        algorithmType,
+        generations: 8,
+        populationSize: 10,
+        crossoverCount: 6,
+        eliteCount: 1,
+        localSearchCount: 1,
+        tournamentSize: 2,
+        mutationRate: 0.35,
+        seed: 31
+      },
+      "tournament"
+    ).run(smallTspData.minimalTourLength);
+
+    expect(result.routeIsValid).toBe(true);
+    expect(result.bestSample.route).toHaveLength(smallTspData.cities.length);
+    expect(result.bestSample.totalDistance).toBeGreaterThan(0);
+  });
+
+  it.each(algorithmTypes)("returns a valid Dantzig route with the %s algorithm", (algorithmType) => {
+    const data = loadFixtureData();
+    const result = new Algorithm(
+      data.cities,
+      data.distances,
+      {
+        ...defaultConfig,
+        algorithmType,
+        generations: 5,
+        populationSize: 30,
+        crossoverCount: 12,
+        eliteCount: 2,
+        localSearchCount: 1,
+        tournamentSize: 3,
+        mutationRate: 0.2,
+        seed: 37
+      },
       "tournament"
     ).run(data.minimalTourLength);
 

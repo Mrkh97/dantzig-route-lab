@@ -1,8 +1,8 @@
 import { create } from "zustand";
 
 import { loadDantzigData } from "@/lib/tsp/data";
-import { calculateGenerationPercent } from "@/lib/tsp/progress";
 import type { GAConfig, GAProgressSnapshot, GAResult, SelectionType, TSPData } from "@/lib/tsp/types";
+import { createInitialProgress, normalizeRunProgress, progressFromResult } from "@/ui/store/progressState";
 import type { SolverWorkerRequest, SolverWorkerResponse } from "@/ui/workers/solverWorkerTypes";
 
 export type RunStatus = "idle" | "loading" | "running" | "ready" | "error";
@@ -33,16 +33,22 @@ interface SolverStore {
 }
 
 export const dashboardDefaultConfig: GAConfig = {
+  algorithmType: "elitist",
   populationSize: 500,
   generations: 10000,
   crossoverCount: 400,
+  mutationMethod: "swap",
   mutationRate: 0.01,
   eliteCount: 5,
+  localSearchCount: 2,
   tournamentSize: 5,
-  seed: 20240524
+  seed: -1
 };
 
 let solverWorker: Worker | null = null;
+let pendingProgress: GAProgressSnapshot | null = null;
+let pendingProgressRunId: string | null = null;
+let pendingProgressFrame: number | null = null;
 
 export const useSolverStore = create<SolverStore>((set, get) => ({
   data: null,
@@ -97,6 +103,7 @@ export const useSolverStore = create<SolverStore>((set, get) => ({
     }
 
     solverWorker?.terminate();
+    cancelPendingProgress();
     const worker = new Worker(new URL("../workers/solver.worker.ts", import.meta.url), { type: "module" });
     solverWorker = worker;
 
@@ -106,16 +113,7 @@ export const useSolverStore = create<SolverStore>((set, get) => ({
       status: "running",
       error: null,
       result: null,
-      progress: {
-        generation: 0,
-        totalGenerations: state.config.generations,
-        percent: 0,
-        bestDistance: 0,
-        averageDistance: 0,
-        currentGenerationRoute: [],
-        bestRoute: [],
-        routeIsValid: false
-      }
+      progress: createInitialProgress(state.config.generations)
     });
 
     worker.onmessage = (event: MessageEvent<SolverWorkerResponse>) => {
@@ -129,19 +127,43 @@ export const useSolverStore = create<SolverStore>((set, get) => ({
             solverWorker = null;
           }
         }
+        if (pendingProgressRunId === message.runId) {
+          cancelPendingProgress();
+        }
         return;
       }
 
       if (message.type === "progress") {
-        const progress = normalizeProgress(message.progress, current.progress);
-        if (progress) {
-          set({ progress });
+        pendingProgress = normalizeRunProgress(message.progress, pendingProgress ?? current.progress);
+        pendingProgressRunId = message.runId;
+        if (pendingProgressFrame === null) {
+          pendingProgressFrame = requestProgressFrame(() => {
+            pendingProgressFrame = null;
+            const progress = pendingProgress;
+            const progressRunId = pendingProgressRunId;
+            pendingProgress = null;
+            pendingProgressRunId = null;
+
+            if (!progress || progressRunId === null) {
+              return;
+            }
+
+            set((latest) => {
+              if (latest.currentRunId !== progressRunId || latest.status !== "running") {
+                return {};
+              }
+
+              const normalized = normalizeRunProgress(progress, latest.progress);
+              return normalized === latest.progress ? {} : { progress: normalized };
+            });
+          });
         }
         return;
       }
 
       if (message.type === "done") {
         const createdAt = new Date();
+        cancelPendingProgress();
         set((latest) => ({
           result: message.result,
           progress: progressFromResult(message.result),
@@ -172,6 +194,7 @@ export const useSolverStore = create<SolverStore>((set, get) => ({
       }
 
       if (message.type === "cancelled") {
+        cancelPendingProgress();
         set({ status: "idle", currentRunId: null, progress: null });
         worker.terminate();
         if (solverWorker === worker) {
@@ -180,6 +203,7 @@ export const useSolverStore = create<SolverStore>((set, get) => ({
         return;
       }
 
+      cancelPendingProgress();
       set({
         status: "error",
         currentRunId: null,
@@ -192,6 +216,7 @@ export const useSolverStore = create<SolverStore>((set, get) => ({
     };
 
     worker.onerror = (event) => {
+      cancelPendingProgress();
       set({
         status: "error",
         currentRunId: null,
@@ -228,50 +253,10 @@ export const useSolverStore = create<SolverStore>((set, get) => ({
       runId: state.currentRunId
     };
     solverWorker.postMessage(request);
+    cancelPendingProgress();
     set({ status: "idle", currentRunId: null, progress: null });
   }
 }));
-
-function progressFromResult(result: GAResult): GAProgressSnapshot {
-  const latest = result.history[result.history.length - 1];
-
-  return {
-    generation: result.generations,
-    totalGenerations: result.generations,
-    percent: calculateGenerationPercent(result.generations, result.generations),
-    bestDistance: latest?.bestDistance ?? result.bestSample.totalDistance,
-    averageDistance: latest?.averageDistance ?? result.bestSample.totalDistance,
-    currentGenerationRoute: result.bestSample.route,
-    bestRoute: result.bestSample.route,
-    routeIsValid: result.routeIsValid
-  };
-}
-
-function normalizeProgress(
-  progress: GAProgressSnapshot,
-  previous: GAProgressSnapshot | null
-): GAProgressSnapshot | null {
-  if (previous && progress.totalGenerations !== previous.totalGenerations) {
-    return null;
-  }
-  if (previous && progress.generation < previous.generation) {
-    return null;
-  }
-
-  const totalGenerations = Math.max(0, progress.totalGenerations);
-  const generation = Math.min(Math.max(0, progress.generation), totalGenerations);
-  const currentGenerationRoute =
-    progress.currentGenerationRoute?.length > 0 ? progress.currentGenerationRoute : progress.bestRoute;
-
-  return {
-    ...progress,
-    generation,
-    totalGenerations,
-    percent: calculateGenerationPercent(generation, totalGenerations),
-    currentGenerationRoute,
-    bestRoute: progress.bestRoute.length > 0 ? progress.bestRoute : currentGenerationRoute
-  };
-}
 
 function createRunId(seed: number | null): string {
   const timestamp = new Date();
@@ -284,4 +269,30 @@ function createRunId(seed: number | null): string {
       ? globalThis.crypto.randomUUID()
       : Math.random().toString(36).slice(2);
   return `#${date}-${time}-${seed ?? "random"}-${randomSuffix}`;
+}
+
+function requestProgressFrame(callback: FrameRequestCallback): number {
+  if (typeof globalThis.requestAnimationFrame === "function") {
+    return globalThis.requestAnimationFrame(callback);
+  }
+
+  return globalThis.setTimeout(() => callback(globalThis.performance?.now() ?? Date.now()), 16) as unknown as number;
+}
+
+function cancelProgressFrame(frame: number): void {
+  if (typeof globalThis.cancelAnimationFrame === "function") {
+    globalThis.cancelAnimationFrame(frame);
+    return;
+  }
+
+  globalThis.clearTimeout(frame);
+}
+
+function cancelPendingProgress(): void {
+  if (pendingProgressFrame !== null) {
+    cancelProgressFrame(pendingProgressFrame);
+  }
+  pendingProgress = null;
+  pendingProgressRunId = null;
+  pendingProgressFrame = null;
 }

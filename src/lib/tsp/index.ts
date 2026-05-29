@@ -7,11 +7,13 @@ export { calculateGenerationPercent } from "./progress.js";
 export { SeededRandom } from "./random.js";
 export { defaultConfig } from "./types.js";
 export type {
+  AlgorithmType,
   GAConfig,
   GAProgressSnapshot,
   GAResult,
   GeneModel,
   GenerationSnapshot,
+  MutationMethod,
   SampleSnapshot,
   SelectionType,
   TSPData

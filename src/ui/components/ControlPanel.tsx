@@ -12,9 +12,9 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
-import { Slider } from "@/components/ui/slider";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import type { GAConfig, SelectionType } from "@/lib/tsp/types";
+import type { AlgorithmType, GAConfig, MutationMethod, SelectionType } from "@/lib/tsp/types";
 
 interface ControlPanelProps {
   config: GAConfig;
@@ -29,42 +29,38 @@ interface ControlPanelProps {
   onReset: () => void;
 }
 
-const fields: Array<{
-  key: keyof Omit<GAConfig, "mutationRate">;
+type NumberFieldKey =
+  | "seed"
+  | "generations"
+  | "populationSize"
+  | "crossoverCount"
+  | "eliteCount"
+  | "localSearchCount"
+  | "tournamentSize"
+  | "mutationRate";
+
+interface NumberField {
+  key: NumberFieldKey;
   label: string;
   min: number;
   max: number;
   step: number;
   help: string;
-}> = [
-  {
-    key: "seed",
-    label: "Random seed",
-    min: -1,
-    max: 99999999,
-    step: 1,
-    help: "Use -1 for a random seed; use the same positive seed to reproduce a run."
-  },
-  { key: "generations", label: "Generations", min: 1, max: 50000, step: 100, help: "Total evolution passes." },
-  { key: "populationSize", label: "Population size", min: 2, max: 2000, step: 10, help: "Candidate tours per generation." },
-  {
-    key: "crossoverCount",
-    label: "Crossover (offspring count)",
-    min: 1,
-    max: 2000,
-    step: 10,
-    help: "Maximum parent pair crossover attempts."
-  },
-  { key: "eliteCount", label: "Elite count", min: 0, max: 100, step: 1, help: "Top routes copied into the next generation." },
-  {
-    key: "tournamentSize",
-    label: "Tournament size",
-    min: 1,
-    max: 500,
-    step: 1,
-    help: "Number of contestants when tournament selection is used."
-  }
-];
+}
+
+const algorithmLabels: Record<AlgorithmType, string> = {
+  simple: "Simple",
+  elitist: "Elitist",
+  "steady-state": "Steady",
+  memetic: "Memetic"
+};
+
+const mutationLabels: Record<MutationMethod, string> = {
+  swap: "Swap",
+  inversion: "Inversion",
+  insertion: "Insertion",
+  scramble: "Scramble"
+};
 
 export function ControlPanel({
   config,
@@ -78,7 +74,7 @@ export function ControlPanel({
   onCancel,
   onReset
 }: ControlPanelProps): ReactElement {
-  function updateField(key: keyof GAConfig, value: string): void {
+  function updateField(key: NumberFieldKey, value: string): void {
     const parsed = key === "seed" ? parseSeedValue(value) : Number(value);
     onConfigChange({ [key]: parsed } as Partial<GAConfig>);
   }
@@ -86,6 +82,24 @@ export function ControlPanel({
   return (
     <div className="flex flex-col gap-4">
       <FieldGroup className="gap-4">
+        <Field className="flex flex-col gap-2">
+          <FieldLabel className="flex items-center gap-1 text-sm font-normal text-foreground">
+            Algorithm <Info text="The population replacement strategy used by the solver." />
+          </FieldLabel>
+          <Tabs
+            value={config.algorithmType}
+            onValueChange={(value) => onConfigChange({ algorithmType: value as AlgorithmType })}
+          >
+            <TabsList>
+              {(Object.keys(algorithmLabels) as AlgorithmType[]).map((algorithmType) => (
+                <TabsTrigger key={algorithmType} value={algorithmType} disabled={disabled}>
+                  {algorithmLabels[algorithmType]}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        </Field>
+
         <Field className="grid grid-cols-[170px_1fr] items-center gap-4">
           <FieldLabel className="flex items-center gap-1 text-sm font-normal text-foreground">
             Selection method <Info text="The parent selection strategy used by the genetic algorithm." />
@@ -107,7 +121,31 @@ export function ControlPanel({
           </Select>
         </Field>
 
-        {fields.map((field) => (
+        <Field className="grid grid-cols-[170px_1fr] items-center gap-4">
+          <FieldLabel className="flex items-center gap-1 text-sm font-normal text-foreground">
+            Mutation method <Info text="The route mutation operator applied after crossover." />
+          </FieldLabel>
+          <Select
+            value={config.mutationMethod}
+            disabled={disabled}
+            onValueChange={(value) => onConfigChange({ mutationMethod: value as MutationMethod })}
+          >
+            <SelectTrigger className="h-10 w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {(Object.keys(mutationLabels) as MutationMethod[]).map((mutationMethod) => (
+                  <SelectItem key={mutationMethod} value={mutationMethod}>
+                    {mutationLabels[mutationMethod]}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </Field>
+
+        {getVisibleFields(config.algorithmType, selection).map((field) => (
           <Field className="grid grid-cols-[170px_1fr] items-center gap-4" key={field.key}>
             <FieldLabel htmlFor={field.key} className="flex items-center gap-1 text-sm font-normal text-foreground">
               {field.label} <Info text={field.help} />
@@ -118,37 +156,13 @@ export function ControlPanel({
               min={field.min}
               max={field.max}
               step={field.step}
-              value={field.key === "seed" ? formatSeedValue(config.seed) : config[field.key] ?? ""}
+              value={formatFieldValue(config, field.key)}
               disabled={disabled}
               onChange={(event) => updateField(field.key, event.target.value)}
               className="h-10"
             />
           </Field>
         ))}
-
-        <Field className="grid grid-cols-[170px_1fr] items-start gap-4">
-          <FieldLabel className="mt-1 flex items-center gap-1 text-sm font-normal text-foreground">
-            Mutation rate <Info text="Probability that a child route receives a city swap mutation." />
-          </FieldLabel>
-          <div className="flex flex-col gap-2">
-            <div className="text-right text-sm text-foreground">{config.mutationRate.toFixed(3)}</div>
-            <Slider
-              min={0}
-              max={0.5}
-              step={0.001}
-              value={[config.mutationRate]}
-              disabled={disabled}
-              onValueChange={([value]) => onConfigChange({ mutationRate: value })}
-            />
-            <div className="grid grid-cols-5 text-xs text-muted-foreground">
-              <span>0</span>
-              <span>0.001</span>
-              <span>0.01</span>
-              <span>0.1</span>
-              <span className="text-right">0.5</span>
-            </div>
-          </div>
-        </Field>
       </FieldGroup>
 
       <div className="mt-1 grid grid-cols-[1fr_52px] gap-3">
@@ -169,17 +183,92 @@ export function ControlPanel({
   );
 }
 
+function getVisibleFields(algorithmType: AlgorithmType, selection: SelectionType): NumberField[] {
+  const fields: NumberField[] = [
+    {
+      key: "seed",
+      label: "Random seed",
+      min: -1,
+      max: 99999999,
+      step: 1,
+      help: "Use -1 for a random seed; use the same positive seed to reproduce a run."
+    },
+    { key: "generations", label: "Generations", min: 1, max: 50000, step: 100, help: "Total evolution passes." },
+    {
+      key: "populationSize",
+      label: "Population size",
+      min: 2,
+      max: 2000,
+      step: 10,
+      help: "Candidate tours per generation."
+    },
+    {
+      key: "crossoverCount",
+      label: algorithmType === "steady-state" ? "Replacements / generation" : "Crossover pairs",
+      min: 1,
+      max: 2000,
+      step: 10,
+      help:
+        algorithmType === "steady-state"
+          ? "Maximum offspring considered for replacing the weakest routes each generation."
+          : "Maximum parent pair crossover attempts."
+    },
+    {
+      key: "mutationRate",
+      label: "Mutation rate",
+      min: 0,
+      max: 1,
+      step: 0.001,
+      help: "Probability that a child route receives the selected mutation."
+    }
+  ];
+
+  if (algorithmType === "elitist" || algorithmType === "memetic") {
+    fields.push({
+      key: "eliteCount",
+      label: "Elite count",
+      min: 0,
+      max: 100,
+      step: 1,
+      help: "Top routes copied into the next generation."
+    });
+  }
+
+  if (algorithmType === "memetic") {
+    fields.push({
+      key: "localSearchCount",
+      label: "2-opt refined tours",
+      min: 0,
+      max: 100,
+      step: 1,
+      help: "Best routes that receive one bounded 2-opt improvement pass each generation."
+    });
+  }
+
+  if (selection === "tournament") {
+    fields.push({
+      key: "tournamentSize",
+      label: "Tournament size",
+      min: 1,
+      max: 500,
+      step: 1,
+      help: "Number of contestants when tournament selection is used."
+    });
+  }
+
+  return fields;
+}
+
 function parseSeedValue(value: string): number | null {
   if (value.trim() === "") {
     return null;
   }
 
-  const parsed = Number(value);
-  return parsed === -1 ? null : parsed;
+  return Number(value);
 }
 
-function formatSeedValue(seed: number | null): number {
-  return seed ?? -1;
+function formatFieldValue(config: GAConfig, key: NumberFieldKey): number | string {
+  return config[key] ?? "";
 }
 
 function Info({ text }: { text: string }): ReactElement {

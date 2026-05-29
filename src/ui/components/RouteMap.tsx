@@ -28,6 +28,8 @@ const plot = {
 };
 const plotWidth = width - plot.left - plot.right;
 const plotHeight = height - plot.top - plot.bottom;
+const cityCoordinateScale = 0.78;
+const usContextMapHref = "/assets/us-context-map.png";
 
 export function RouteMap({ coordinates, route, status }: RouteMapProps): ReactElement {
   const points = useMemo(() => projectPoints(coordinates), [coordinates]);
@@ -44,28 +46,28 @@ export function RouteMap({ coordinates, route, status }: RouteMapProps): ReactEl
 
   return (
     <section className="relative h-[584px] bg-card p-5">
-      <svg className="block size-full" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="City route map">
+      <svg className="block size-full" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Dantzig route map with United States context">
         <defs>
-          <pattern id="fine-dots" width="8" height="8" patternUnits="userSpaceOnUse">
-            <circle cx="1" cy="1" r="0.45" fill="#e8e8e8" />
-          </pattern>
-          <pattern id="major-grid" width={plotWidth / 10} height={plotHeight / 10} patternUnits="userSpaceOnUse">
-            <path d={`M ${plotWidth / 10} 0 L 0 0 0 ${plotHeight / 10}`} fill="none" stroke="#dfdfdf" strokeWidth="1" />
-          </pattern>
-          <filter id="start-glow" x="-80%" y="-80%" width="260%" height="260%">
-            <feGaussianBlur stdDeviation="7" result="blur" />
-            <feColorMatrix
-              in="blur"
-              type="matrix"
-              values="0.82 0 0 0 0.82 0 0.35 0 0 0.35 0 0 0.08 0 0.08 0 0 0 0.45 0"
-            />
-          </filter>
+          <clipPath id="route-map-plot-clip">
+            <rect x={plot.left} y={plot.top} width={plotWidth} height={plotHeight} rx="18" />
+          </clipPath>
         </defs>
 
-        <rect x={plot.left} y={plot.top} width={plotWidth} height={plotHeight} fill="url(#fine-dots)" />
-        <rect x={plot.left} y={plot.top} width={plotWidth} height={plotHeight} fill="url(#major-grid)" />
-        <ContourLines />
-        <Axes />
+        <g clipPath="url(#route-map-plot-clip)">
+          <rect x={plot.left} y={plot.top} width={plotWidth} height={plotHeight} fill="#fafafa" />
+          <image
+            href={usContextMapHref}
+            x={plot.left}
+            y={plot.top}
+            width={plotWidth}
+            height={plotHeight}
+            opacity="0.72"
+            preserveAspectRatio="xMidYMid slice"
+          />
+          <rect x={plot.left} y={plot.top} width={plotWidth} height={plotHeight} fill="#ffffff" fillOpacity="0.18" />
+          <ContextGrid />
+        </g>
+        <rect x={plot.left} y={plot.top} width={plotWidth} height={plotHeight} rx="18" fill="none" stroke="var(--border)" strokeOpacity="0.72" />
 
         {routePath ? (
           <path
@@ -130,12 +132,19 @@ function projectPoints(coordinates: Coordinates | null): ProjectedPoint[] {
   const maxX = Math.max(...entries.map((entry) => entry.sourceX));
   const minY = Math.min(...entries.map((entry) => entry.sourceY));
   const maxY = Math.max(...entries.map((entry) => entry.sourceY));
+  const centerX = plot.left + plotWidth / 2;
+  const centerY = plot.top + plotHeight / 2;
 
-  return entries.map((entry) => ({
-    city: entry.city,
-    x: plot.left + ((entry.sourceX - minX) / (maxX - minX)) * plotWidth,
-    y: plot.top + (1 - (entry.sourceY - minY) / (maxY - minY)) * plotHeight
-  }));
+  return entries.map((entry) => {
+    const x = plot.left + ((entry.sourceX - minX) / (maxX - minX)) * plotWidth;
+    const y = plot.top + (1 - (entry.sourceY - minY) / (maxY - minY)) * plotHeight;
+
+    return {
+      city: entry.city,
+      x: centerX + (x - centerX) * cityCoordinateScale,
+      y: centerY + (y - centerY) * cityCoordinateScale
+    };
+  });
 }
 
 function buildRoutePath(points: ProjectedPoint[], route: number[]): string {
@@ -153,39 +162,18 @@ function buildRoutePath(points: ProjectedPoint[], route: number[]): string {
     .join(" ");
 }
 
-function Axes(): ReactElement {
-  const labels = Array.from({ length: 11 }, (_, index) => index * 10);
+function ContextGrid(): ReactElement {
+  const columns = Array.from({ length: 13 }, (_, index) => plot.left + (index / 12) * plotWidth);
+  const rows = Array.from({ length: 7 }, (_, index) => plot.top + (index / 6) * plotHeight);
 
   return (
-    <g className="fill-muted-foreground text-[13px]">
-      {labels.map((label) => {
-        const x = plot.left + (label / 100) * plotWidth;
-        const y = plot.top + (1 - label / 100) * plotHeight;
-        return (
-          <g key={label}>
-            <text x={plot.left - 10} y={y + 4} textAnchor="end">
-              {label}
-            </text>
-            <text x={x} y={height - 7} textAnchor="middle">
-              {label}
-            </text>
-          </g>
-        );
-      })}
-    </g>
-  );
-}
-
-function ContourLines(): ReactElement {
-  return (
-    <g fill="none" stroke="#d8d8d8" strokeDasharray="2 4" strokeOpacity="0.55" strokeWidth="1">
-      <path d="M60 112 C146 64 190 156 119 211 C51 264 114 353 34 420" />
-      <path d="M181 18 C144 103 269 122 300 205 C331 291 217 329 257 432" />
-      <path d="M318 15 C423 89 313 142 360 219 C405 292 498 253 505 344 C514 459 389 425 345 521" />
-      <path d="M470 58 C602 5 718 79 676 176 C637 264 731 314 716 414 C702 501 583 463 546 534" />
-      <path d="M739 35 C873 -1 916 88 844 164 C772 240 927 267 919 366 C910 474 788 449 763 525" />
-      <path d="M936 30 C1023 78 979 151 1036 212 C1093 274 995 326 1051 402 C1084 449 1019 493 976 526" />
-      <path d="M82 476 C190 400 289 501 414 471 C538 441 645 517 768 474 C890 431 962 514 1046 456" />
+    <g stroke="var(--border)" strokeOpacity="0.28" strokeWidth="1">
+      {columns.map((x) => (
+        <line key={`column-${x}`} x1={x} y1={plot.top} x2={x} y2={plot.top + plotHeight} />
+      ))}
+      {rows.map((y) => (
+        <line key={`row-${y}`} x1={plot.left} y1={y} x2={plot.left + plotWidth} y2={y} />
+      ))}
     </g>
   );
 }
