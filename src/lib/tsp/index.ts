@@ -4,7 +4,7 @@ export { loadDantzigData, parseDantzigData, validateData } from "./data.js";
 export { FitnessCalculator } from "./fitness.js";
 export { Population, Sample } from "./models.js";
 export { calculateGenerationPercent } from "./progress.js";
-export { SeededRandom } from "./random.js";
+export { MAX_RANDOM_SEED, MIN_RANDOM_SEED, SeededRandom, createRandomSeed } from "./random.js";
 export { defaultConfig } from "./types.js";
 export type {
   AlgorithmType,

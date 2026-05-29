@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import { loadDantzigData } from "@/lib/tsp/data";
+import { createRandomSeed } from "@/lib/tsp/random";
 import type { GAConfig, GAProgressSnapshot, GAResult, SelectionType, TSPData } from "@/lib/tsp/types";
 import { createInitialProgress, normalizeRunProgress, progressFromResult } from "@/ui/store/progressState";
 import type { SolverWorkerRequest, SolverWorkerResponse } from "@/ui/workers/solverWorkerTypes";
@@ -104,16 +105,17 @@ export const useSolverStore = create<SolverStore>((set, get) => ({
 
     solverWorker?.terminate();
     cancelPendingProgress();
+    const runConfig = resolveRunConfig(state.config);
     const worker = new Worker(new URL("../workers/solver.worker.ts", import.meta.url), { type: "module" });
     solverWorker = worker;
 
-    const runId = createRunId(state.config.seed);
+    const runId = createRunId(runConfig.seed);
     set({
       currentRunId: runId,
       status: "running",
       error: null,
       result: null,
-      progress: createInitialProgress(state.config.generations)
+      progress: createInitialProgress(runConfig.generations)
     });
 
     worker.onmessage = (event: MessageEvent<SolverWorkerResponse>) => {
@@ -173,7 +175,7 @@ export const useSolverStore = create<SolverStore>((set, get) => ({
             {
               id: runId,
               result: message.result,
-              config: latest.config,
+              config: runConfig,
               createdAt: createdAt.toLocaleString([], {
                 month: "short",
                 day: "numeric",
@@ -234,7 +236,7 @@ export const useSolverStore = create<SolverStore>((set, get) => ({
       payload: {
         cities: state.data.cities,
         distances: state.data.distances,
-        config: state.config,
+        config: runConfig,
         selection: state.selection,
         referenceDistance: state.data.minimalTourLength
       }
@@ -257,6 +259,13 @@ export const useSolverStore = create<SolverStore>((set, get) => ({
     set({ status: "idle", currentRunId: null, progress: null });
   }
 }));
+
+export function resolveRunConfig(config: GAConfig): GAConfig {
+  return {
+    ...config,
+    seed: config.seed === -1 || config.seed === null ? createRandomSeed() : config.seed
+  };
+}
 
 function createRunId(seed: number | null): string {
   const timestamp = new Date();

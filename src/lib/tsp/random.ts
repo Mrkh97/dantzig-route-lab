@@ -2,7 +2,7 @@ export class SeededRandom {
   private state: number;
 
   constructor(seed: number | null = null) {
-    this.state = seed === null ? Date.now() >>> 0 : seed >>> 0;
+    this.state = seed === null ? createRandomSeed() : seed >>> 0;
     if (this.state === 0) {
       this.state = 0x6d2b79f5;
     }
@@ -36,4 +36,17 @@ export class SeededRandom {
     this.shuffle(copy);
     return copy.slice(0, count);
   }
+}
+
+export const MIN_RANDOM_SEED = 1;
+export const MAX_RANDOM_SEED = 0xffffffff;
+
+export function createRandomSeed(): number {
+  if (typeof globalThis.crypto?.getRandomValues === "function") {
+    const values = new Uint32Array(1);
+    globalThis.crypto.getRandomValues(values);
+    return (values[0] % MAX_RANDOM_SEED) + MIN_RANDOM_SEED;
+  }
+
+  return Math.floor(Math.random() * MAX_RANDOM_SEED) + MIN_RANDOM_SEED;
 }

@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { MAX_RANDOM_SEED } from "@/lib/tsp/random";
 import type { AlgorithmType, GAConfig, MutationMethod, SelectionType } from "@/lib/tsp/types";
 
 interface ControlPanelProps {
@@ -189,9 +190,9 @@ function getVisibleFields(algorithmType: AlgorithmType, selection: SelectionType
       key: "seed",
       label: "Random seed",
       min: -1,
-      max: 99999999,
+      max: MAX_RANDOM_SEED,
       step: 1,
-      help: "Use -1 for a random seed; use the same positive seed to reproduce a run."
+      help: "Use -1 to generate and save a random seed; copy a recent-run seed to reproduce it."
     },
     { key: "generations", label: "Generations", min: 1, max: 50000, step: 100, help: "Total evolution passes." },
     {
