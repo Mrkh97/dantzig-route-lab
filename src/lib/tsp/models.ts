@@ -1,7 +1,6 @@
 import type { SampleSnapshot } from "./types.js";
 
 export class Sample {
-  public sampleId = -1;
   public fitness = 0;
   public normalizedFitness = 0;
   public totalDistance = Number.POSITIVE_INFINITY;
@@ -18,7 +17,6 @@ export class Sample {
 
   copy(): Sample {
     const copied = Sample.fromRoute(this.route);
-    copied.sampleId = this.sampleId;
     copied.fitness = this.fitness;
     copied.normalizedFitness = this.normalizedFitness;
     copied.totalDistance = this.totalDistance;
@@ -33,7 +31,6 @@ export class Sample {
 
   toSnapshot(): SampleSnapshot {
     return {
-      sampleId: this.sampleId,
       route: this.route,
       fitness: this.fitness,
       normalizedFitness: this.normalizedFitness,
@@ -44,12 +41,9 @@ export class Sample {
 
 export class Population {
   public samples: Sample[] = [];
-  public nextSampleId = 0;
 
   addSample(sample: Sample): void {
     const added = sample.copy();
-    added.sampleId = this.nextSampleId;
-    this.nextSampleId += 1;
     this.samples.push(added);
   }
 

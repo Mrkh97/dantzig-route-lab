@@ -18,6 +18,29 @@ interface ProgressiveRunOptions {
   yieldEvery?: number;
 }
 
+interface RunState {
+  population: Population;
+  history: GenerationSnapshot[];
+  bestOverallSample: Sample;
+}
+
+interface NextGenerationOptions {
+  eliteCount: number;
+}
+
+export const defaultConfig: GAConfig = {
+  algorithmType: "elitist",
+  populationSize: 150,
+  generations: 1000,
+  crossoverCount: 100,
+  mutationMethod: "swap",
+  mutationRate: 0.05,
+  eliteCount: 4,
+  localSearchCount: 2,
+  tournamentSize: 5,
+  seed: -1
+};
+
 export class Algorithm {
   private readonly rng: SeededRandom;
   private readonly fitnessCalculator: FitnessCalculator;
@@ -34,42 +57,31 @@ export class Algorithm {
   }
 
   run(referenceDistance: number | null = null): GAResult {
-    const population = createInitialPopulation(this.cities, this.config.populationSize, this.rng);
-    const history: GenerationSnapshot[] = [];
-
-    this.fitnessCalculator.evaluate(population.samples);
-    population.sortByFitness();
-    history.push(this.snapshotGeneration(0, population));
+    const state = this.createInitialRunState();
 
     for (let generation = 1; generation <= this.config.generations; generation += 1) {
-      this.evolvePopulation(population);
-      history.push(this.snapshotGeneration(generation, population));
+      this.advanceGeneration(state, generation);
     }
 
-    return this.toResult(population, history, referenceDistance);
+    return this.toResult(state, referenceDistance);
   }
 
   async runProgressive(
     referenceDistance: number | null = null,
     options: ProgressiveRunOptions = {}
   ): Promise<GAResult | null> {
-    const population = createInitialPopulation(this.cities, this.config.populationSize, this.rng);
-    const history: GenerationSnapshot[] = [];
+    const state = this.createInitialRunState();
     const yieldEvery = Math.max(1, options.yieldEvery ?? 25);
 
-    this.fitnessCalculator.evaluate(population.samples);
-    population.sortByFitness();
-    history.push(this.snapshotGeneration(0, population));
-    options.onProgress?.(this.snapshotProgress(0, population));
+    options.onProgress?.(this.snapshotProgress(0, state.population, state.bestOverallSample));
 
     for (let generation = 1; generation <= this.config.generations; generation += 1) {
       if (options.shouldCancel?.()) {
         return null;
       }
 
-      this.evolvePopulation(population);
-      history.push(this.snapshotGeneration(generation, population));
-      options.onProgress?.(this.snapshotProgress(generation, population));
+      this.advanceGeneration(state, generation);
+      options.onProgress?.(this.snapshotProgress(generation, state.population, state.bestOverallSample));
 
       if (generation % yieldEvery === 0) {
         await yieldToEventLoop();
@@ -80,84 +92,152 @@ export class Algorithm {
       return null;
     }
 
-    return this.toResult(population, history, referenceDistance);
+    return this.toResult(state, referenceDistance);
   }
 
   evolvePopulation(population: Population): void {
-    this.fitnessCalculator.evaluate(population.samples);
-    population.sortByFitness();
+    this.runOneGeneration(population);
+  }
 
-    if (this.config.algorithmType === "steady-state") {
-      this.evolveSteadyState(population);
-      return;
-    }
+  private createInitialRunState(): RunState {
+    const population = createInitialPopulation(this.cities, this.config.populationSize, this.rng);
+    this.evaluateAndRank(population);
+    const bestOverallSample = population.getFittest().copy();
 
-    const eliteCount =
-      this.config.algorithmType === "elitist" || this.config.algorithmType === "memetic"
-        ? this.config.eliteCount
-        : 0;
-    this.evolveGenerational(population, eliteCount);
+    return {
+      population,
+      bestOverallSample,
+      history: [this.snapshotGeneration(0, population, bestOverallSample)]
+    };
+  }
 
-    if (this.config.algorithmType === "memetic") {
-      this.applyLocalSearch(population);
+  private advanceGeneration(state: RunState, generation: number): void {
+    this.runOneGeneration(state.population);
+    this.recordGeneration(state, generation);
+  }
+
+  private recordGeneration(state: RunState, generation: number): void {
+    state.bestOverallSample = this.updateBestOverall(state.population.getFittest(), state.bestOverallSample);
+    state.history.push(this.snapshotGeneration(generation, state.population, state.bestOverallSample));
+  }
+
+  private runOneGeneration(population: Population): void {
+    switch (this.config.algorithmType) {
+      case "simple":
+        this.runSimpleGeneration(population);
+        return;
+      case "elitist":
+        this.runElitistGeneration(population);
+        return;
+      case "steady-state":
+        this.runSteadyStateGeneration(population);
+        return;
+      case "memetic":
+        this.runMemeticGeneration(population);
+        return;
     }
   }
 
-  private evolveGenerational(population: Population, eliteCount: number): void {
-    const nextGeneration = new Population();
-    const elites = population.samples.slice(0, eliteCount).map((sample) => sample.copy());
-    nextGeneration.extend(elites);
-
-    let crossoverPairs = 0;
-    while (
-      nextGeneration.samples.length < this.config.populationSize &&
-      crossoverPairs < this.config.crossoverCount
-    ) {
-      const [parent1, parent2] = this.selectParents(population);
-      const [child1, child2] = Algorithm.pmxCrossover(parent1, parent2, this.rng);
-      Algorithm.mutate(child1, this.rng, this.config.mutationRate, this.config.mutationMethod);
-      Algorithm.mutate(child2, this.rng, this.config.mutationRate, this.config.mutationMethod);
-      nextGeneration.addSample(child1);
-      if (nextGeneration.samples.length < this.config.populationSize) {
-        nextGeneration.addSample(child2);
-      }
-      crossoverPairs += 1;
-    }
-
-    while (nextGeneration.samples.length < this.config.populationSize) {
-      const survivor = this.selectParents(population)[0].copy();
-      Algorithm.mutate(survivor, this.rng, this.config.mutationRate, this.config.mutationMethod);
-      nextGeneration.addSample(survivor);
-    }
-
-    this.fitnessCalculator.evaluate(nextGeneration.samples);
-    nextGeneration.sortByFitness();
-    population.samples = nextGeneration.samples;
-    population.nextSampleId = nextGeneration.nextSampleId;
+  private runSimpleGeneration(population: Population): void {
+    this.evaluateAndRank(population);
+    this.replaceWithNextGeneration(population, { eliteCount: 0 });
   }
 
-  private evolveSteadyState(population: Population): void {
-    const offspring: Sample[] = [];
+  private runElitistGeneration(population: Population): void {
+    this.evaluateAndRank(population);
+    this.replaceWithNextGeneration(population, { eliteCount: this.config.eliteCount });
+  }
 
-    while (offspring.length < this.config.crossoverCount) {
-      const [parent1, parent2] = this.selectParents(population);
-      const [child1, child2] = Algorithm.pmxCrossover(parent1, parent2, this.rng);
-      Algorithm.mutate(child1, this.rng, this.config.mutationRate, this.config.mutationMethod);
-      Algorithm.mutate(child2, this.rng, this.config.mutationRate, this.config.mutationMethod);
-      offspring.push(child1);
-      if (offspring.length < this.config.crossoverCount) {
-        offspring.push(child2);
-      }
-    }
-
-    this.fitnessCalculator.evaluate(offspring);
+  private runSteadyStateGeneration(population: Population): void {
+    this.evaluateAndRank(population);
+    const offspring = this.createOffspring(population, this.config.crossoverCount);
+    this.evaluateSamples(offspring);
     offspring.sort((left, right) => right.fitness - left.fitness);
 
     for (const child of offspring) {
       this.replaceWorstIfFitter(population, child);
     }
-    this.fitnessCalculator.evaluate(population.samples);
+
+    this.evaluateAndRank(population);
+  }
+
+  private runMemeticGeneration(population: Population): void {
+    this.evaluateAndRank(population);
+    this.replaceWithNextGeneration(population, { eliteCount: this.config.eliteCount });
+    this.improveTopRoutesWithTwoOpt(population);
+  }
+
+  private replaceWithNextGeneration(population: Population, options: NextGenerationOptions): void {
+    const nextGeneration = new Population();
+
+    this.copyElites(population, nextGeneration, options.eliteCount);
+    this.addCrossoverChildren(population, nextGeneration);
+    this.fillRemainingSlotsWithMutatedSurvivors(population, nextGeneration);
+
+    this.evaluateAndRank(nextGeneration);
+    population.samples = nextGeneration.samples;
+  }
+
+  private copyElites(sourcePopulation: Population, targetPopulation: Population, eliteCount: number): void {
+    targetPopulation.extend(sourcePopulation.samples.slice(0, eliteCount));
+  }
+
+  private addCrossoverChildren(sourcePopulation: Population, targetPopulation: Population): void {
+    let crossoverPairs = 0;
+    while (
+      targetPopulation.samples.length < this.config.populationSize &&
+      crossoverPairs < this.config.crossoverCount
+    ) {
+      const [child1, child2] = this.createMutatedChildren(sourcePopulation);
+      targetPopulation.addSample(child1);
+      if (targetPopulation.samples.length < this.config.populationSize) {
+        targetPopulation.addSample(child2);
+      }
+      crossoverPairs += 1;
+    }
+  }
+
+  private fillRemainingSlotsWithMutatedSurvivors(sourcePopulation: Population, targetPopulation: Population): void {
+    while (targetPopulation.samples.length < this.config.populationSize) {
+      const survivor = this.selectParents(sourcePopulation)[0].copy();
+      this.mutateSample(survivor);
+      targetPopulation.addSample(survivor);
+    }
+  }
+
+  private createOffspring(sourcePopulation: Population, count: number): Sample[] {
+    const offspring: Sample[] = [];
+
+    while (offspring.length < count) {
+      const [child1, child2] = this.createMutatedChildren(sourcePopulation);
+      offspring.push(child1);
+      if (offspring.length < count) {
+        offspring.push(child2);
+      }
+    }
+
+    return offspring;
+  }
+
+  private createMutatedChildren(sourcePopulation: Population): [Sample, Sample] {
+    const [parent1, parent2] = this.selectParents(sourcePopulation);
+    const [child1, child2] = Algorithm.pmxCrossover(parent1, parent2, this.rng);
+    this.mutateSample(child1);
+    this.mutateSample(child2);
+    return [child1, child2];
+  }
+
+  private mutateSample(sample: Sample): void {
+    Algorithm.mutate(sample, this.rng, this.config.mutationRate, this.config.mutationMethod);
+  }
+
+  private evaluateAndRank(population: Population): void {
+    this.evaluateSamples(population.samples);
     population.sortByFitness();
+  }
+
+  private evaluateSamples(samples: readonly Sample[]): void {
+    this.fitnessCalculator.evaluate(samples);
   }
 
   private replaceWorstIfFitter(population: Population, candidate: Sample): void {
@@ -168,13 +248,11 @@ export class Algorithm {
     }
 
     const replacement = candidate.copy();
-    replacement.sampleId = population.nextSampleId;
-    population.nextSampleId += 1;
     population.samples[worstIndex] = replacement;
     population.sortByFitness();
   }
 
-  private applyLocalSearch(population: Population): void {
+  private improveTopRoutesWithTwoOpt(population: Population): void {
     const localSearchCount = Math.min(this.config.localSearchCount, population.samples.length);
     if (localSearchCount <= 0) {
       return;
@@ -184,8 +262,7 @@ export class Algorithm {
       this.applyTwoOptPass(population.samples[index]);
     }
 
-    this.fitnessCalculator.evaluate(population.samples);
-    population.sortByFitness();
+    this.evaluateAndRank(population);
   }
 
   private applyTwoOptPass(sample: Sample): void {
@@ -351,51 +428,67 @@ export class Algorithm {
     sample.genes.splice(to, 0, gene);
   }
 
-  private snapshotGeneration(generation: number, population: Population): GenerationSnapshot {
-    const bestDistance = population.getFittest().totalDistance;
+  private snapshotGeneration(
+    generation: number,
+    population: Population,
+    bestOverallSample: Sample
+  ): GenerationSnapshot {
+    const currentGenerationDistance = population.getFittest().totalDistance;
     const averageDistance =
       population.samples.reduce((sum, sample) => sum + sample.totalDistance, 0) /
       population.samples.length;
 
     return {
       generation,
-      bestDistance,
+      bestDistance: bestOverallSample.totalDistance,
+      currentGenerationDistance,
       averageDistance
     };
   }
 
-  private snapshotProgress(generation: number, population: Population): GAProgressSnapshot {
-    const bestSample = population.getFittest();
-    const snapshot = this.snapshotGeneration(generation, population);
+  private snapshotProgress(
+    generation: number,
+    population: Population,
+    bestOverallSample: Sample
+  ): GAProgressSnapshot {
+    const currentGenerationBestSample = population.getFittest();
+    const snapshot = this.snapshotGeneration(generation, population, bestOverallSample);
 
     return {
       ...snapshot,
       totalGenerations: this.config.generations,
       percent: calculateGenerationPercent(generation, this.config.generations),
-      currentGenerationRoute: bestSample.route,
-      bestRoute: bestSample.route,
-      routeIsValid: bestSample.isValidPermutation(this.cities)
+      currentGenerationRoute: currentGenerationBestSample.route,
+      bestRoute: bestOverallSample.route,
+      routeIsValid: bestOverallSample.isValidPermutation(this.cities)
     };
   }
 
   private toResult(
-    population: Population,
-    history: GenerationSnapshot[],
+    state: RunState,
     referenceDistance: number | null
   ): GAResult {
-    const bestSample = population.getFittest().copy();
+    const { bestOverallSample, history } = state;
     const referenceDifference =
-      referenceDistance === null ? null : Math.round(bestSample.totalDistance - referenceDistance);
+      referenceDistance === null ? null : Math.round(bestOverallSample.totalDistance - referenceDistance);
 
     return {
       selection: this.selection,
-      bestSample: bestSample.toSnapshot(),
+      bestSample: bestOverallSample.toSnapshot(),
       generations: this.config.generations,
       referenceDistance,
       referenceDifference,
       history,
-      routeIsValid: bestSample.isValidPermutation(this.cities)
+      routeIsValid: bestOverallSample.isValidPermutation(this.cities)
     };
+  }
+
+  private updateBestOverall(currentGenerationBestSample: Sample, bestOverallSample: Sample): Sample {
+    if (currentGenerationBestSample.totalDistance < bestOverallSample.totalDistance) {
+      return currentGenerationBestSample.copy();
+    }
+
+    return bestOverallSample;
   }
 }
 

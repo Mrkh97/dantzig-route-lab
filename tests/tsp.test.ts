@@ -120,6 +120,10 @@ describe("config validation", () => {
     expect(() => validateConfig(rouletteConfig, "roulette")).not.toThrow();
     expect(() => validateConfig(rouletteConfig, "tournament")).toThrow("tournamentSize");
   });
+
+  it("rejects mutation rates outside the 0 to 1 range", () => {
+    expect(() => validateConfig({ ...defaultConfig, mutationRate: 1.1 })).toThrow("mutationRate");
+  });
 });
 
 describe("solver", () => {
@@ -264,10 +268,67 @@ describe("solver", () => {
         (snapshot) =>
           snapshot.routeIsValid &&
           snapshot.currentGenerationRoute.length === smallTspData.cities.length &&
-          snapshot.bestRoute.join(",") === snapshot.currentGenerationRoute.join(",") &&
+          snapshot.bestRoute.length === smallTspData.cities.length &&
+          snapshot.bestDistance <= snapshot.currentGenerationDistance &&
           [...snapshot.currentGenerationRoute].sort((left, right) => left - right).join(",") ===
-            smallTspData.cities.join(",")
+            smallTspData.cities.join(",") &&
+          [...snapshot.bestRoute].sort((left, right) => left - right).join(",") === smallTspData.cities.join(",")
       )
     ).toBe(true);
+    expect(
+      snapshots.every((snapshot, index) => index === 0 || snapshot.bestDistance <= snapshots[index - 1].bestDistance)
+    ).toBe(true);
+  });
+
+  it("keeps the overall best route separate from the current generation route", async () => {
+    const data = loadFixtureData();
+    let foundRun: { resultDistance: number; finalSnapshot: GAProgressSnapshot } | null = null;
+
+    for (let seed = 1; seed <= 80 && foundRun === null; seed += 1) {
+      const snapshots: GAProgressSnapshot[] = [];
+      const result = await new Algorithm(
+        data.cities,
+        data.distances,
+        {
+          ...defaultConfig,
+          algorithmType: "simple",
+          generations: 30,
+          populationSize: 18,
+          crossoverCount: 8,
+          eliteCount: 0,
+          localSearchCount: 0,
+          tournamentSize: 3,
+          mutationRate: 0.75,
+          seed
+        },
+        "tournament"
+      ).runProgressive(data.minimalTourLength, {
+        yieldEvery: 1000,
+        onProgress: (snapshot) => {
+          snapshots.push(snapshot);
+        }
+      });
+      const finalSnapshot = snapshots.at(-1);
+
+      if (
+        result &&
+        finalSnapshot &&
+        finalSnapshot.bestDistance < finalSnapshot.currentGenerationDistance &&
+        finalSnapshot.bestRoute.join(",") !== finalSnapshot.currentGenerationRoute.join(",")
+      ) {
+        foundRun = {
+          resultDistance: result.bestSample.totalDistance,
+          finalSnapshot
+        };
+      }
+    }
+
+    expect(foundRun).not.toBeNull();
+    if (!foundRun) {
+      throw new Error("Expected to find a run where the final generation was worse than the best-so-far route.");
+    }
+    expect(foundRun.finalSnapshot.bestDistance).toBeLessThan(foundRun.finalSnapshot.currentGenerationDistance);
+    expect(foundRun.finalSnapshot.bestRoute).not.toEqual(foundRun.finalSnapshot.currentGenerationRoute);
+    expect(foundRun.resultDistance).toBe(foundRun.finalSnapshot.bestDistance);
   });
 });

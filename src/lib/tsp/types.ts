@@ -7,7 +7,6 @@ export interface GeneModel {
 }
 
 export interface SampleSnapshot {
-  sampleId: number;
   route: number[];
   fitness: number;
   normalizedFitness: number;
@@ -37,6 +36,7 @@ export interface TSPData {
 export interface GenerationSnapshot {
   generation: number;
   bestDistance: number;
+  currentGenerationDistance: number;
   averageDistance: number;
 }
 
@@ -57,16 +57,3 @@ export interface GAProgressSnapshot extends GenerationSnapshot {
   bestRoute: number[];
   routeIsValid: boolean;
 }
-
-export const defaultConfig: GAConfig = {
-  algorithmType: "elitist",
-  populationSize: 150,
-  generations: 1000,
-  crossoverCount: 100,
-  mutationMethod: "swap",
-  mutationRate: 0.05,
-  eliteCount: 4,
-  localSearchCount: 2,
-  tournamentSize: 5,
-  seed: -1
-};

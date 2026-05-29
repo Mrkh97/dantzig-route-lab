@@ -9,6 +9,8 @@ export class SeededRandom {
   }
 
   random(): number {
+    // Mulberry32-style 32-bit PRNG. The bitwise math keeps the state in unsigned
+    // integer space so the same seed always produces the same browser-safe sequence.
     this.state += 0x6d2b79f5;
     let value = this.state;
     value = Math.imul(value ^ (value >>> 15), value | 1);

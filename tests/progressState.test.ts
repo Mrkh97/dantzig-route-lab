@@ -9,6 +9,7 @@ function progressSnapshot(overrides: Partial<GAProgressSnapshot> = {}): GAProgre
     totalGenerations: 100,
     percent: 0,
     bestDistance: 40,
+    currentGenerationDistance: 40,
     averageDistance: 50,
     currentGenerationRoute: [1, 2, 3, 4],
     bestRoute: [1, 2, 3, 4],
@@ -68,7 +69,6 @@ describe("progress state normalization", () => {
     const result: GAResult = {
       selection: "tournament",
       bestSample: {
-        sampleId: 1,
         route: [1, 2, 3, 4],
         fitness: 1,
         normalizedFitness: 1,
@@ -77,7 +77,7 @@ describe("progress state normalization", () => {
       generations: 100,
       referenceDistance: null,
       referenceDifference: null,
-      history: [{ generation: 100, bestDistance: 40, averageDistance: 42 }],
+      history: [{ generation: 100, bestDistance: 40, currentGenerationDistance: 44, averageDistance: 42 }],
       routeIsValid: true
     };
 
@@ -86,5 +86,7 @@ describe("progress state normalization", () => {
     expect(progress.generation).toBe(100);
     expect(progress.totalGenerations).toBe(100);
     expect(progress.percent).toBe(100);
+    expect(progress.bestDistance).toBe(40);
+    expect(progress.currentGenerationDistance).toBe(44);
   });
 });
