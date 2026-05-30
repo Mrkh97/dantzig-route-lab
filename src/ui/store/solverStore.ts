@@ -35,11 +35,11 @@ interface SolverStore {
 
 export const dashboardDefaultConfig: GAConfig = {
   algorithmType: "elitist",
-  populationSize: 500,
-  generations: 10000,
-  crossoverCount: 400,
-  mutationMethod: "swap",
-  mutationRate: 0.01,
+  populationSize: 1500,
+  generations: 300,
+  crossoverCount: 1000,
+  mutationMethod: "scramble",
+  mutationRate: 0.1,
   eliteCount: 5,
   localSearchCount: 2,
   tournamentSize: 5,
